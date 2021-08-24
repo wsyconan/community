@@ -17,6 +17,7 @@ import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
 
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class UserService implements CommunityConstant {
@@ -30,8 +31,8 @@ public class UserService implements CommunityConstant {
     @Autowired
     private TemplateEngine engine;
 
-    @Autowired
-    private LoginTicketMapper loginTicketMapper;
+    //@Autowired
+    //private LoginTicketMapper loginTicketMapper;
 
     @Autowired
     private RedisTemplate redisTemplate;
@@ -42,38 +43,49 @@ public class UserService implements CommunityConstant {
     @Value("${server.servlet.context-path}")
     private String contextPath;
 
+    /* 从数据库获得用户的逻辑：
+        1.优先从缓存中取值
+        2.取不到时初始化缓存数据
+        3.数据变更时清除缓存数据
+    */
     public User findUserById(int id) {
-        return userMapper.selectById(id);
+        //return userMapper.selectById(id);
+        User user = getUserFromCache(id);
+        if (user == null) {
+            user = initCache(id);
+        }
+        return user;
     }
 
     public Map<String, Object> register(User user) {
         Map<String, Object> map = new HashMap<>();
 
         // 空值处理
-        if(user == null) {
+        if (user == null) {
             throw new IllegalArgumentException("参数不能为空!");
         }
-        if(StringUtils.isBlank(user.getUsername())) {
+        if (StringUtils.isBlank(user.getUsername())) {
             map.put("usernameMsg", "账号不能为空");
             return map;
         }
-        if(StringUtils.isBlank(user.getPassword())) {
+        if (StringUtils.isBlank(user.getPassword())) {
             map.put("passwordMsg", "密码不能为空");
             return map;
-        }if(StringUtils.isBlank(user.getEmail())) {
+        }
+        if (StringUtils.isBlank(user.getEmail())) {
             map.put("emailMsg", "邮箱不能为空");
             return map;
         }
 
         // 验证账号
         User userInDB = userMapper.selectByName(user.getUsername());
-        if(userInDB != null) {
+        if (userInDB != null) {
             map.put("usernameMsg", "该账号已存在");
             return map;
         }
         // 验证账号
         userInDB = userMapper.selectByEmail(user.getEmail());
-        if(userInDB != null) {
+        if (userInDB != null) {
             map.put("emailMsg", "该邮箱已被注册");
             return map;
         }
@@ -102,10 +114,11 @@ public class UserService implements CommunityConstant {
 
     public int activation(int userId, String code) {
         User user = userMapper.selectById(userId);
-        if(user.getStatus() == 1) {
+        if (user.getStatus() == 1) {
             return ACTIVATION_REPEAT;
-        } else if(user.getActivationCode().equals(code)) {
+        } else if (user.getActivationCode().equals(code)) {
             userMapper.updateStatus(userId, 1);
+            clearCache(userId);
             return ACTIVATION_SUCCESS;
         } else {
             return ACTIVATION_FAILURE;
@@ -116,29 +129,29 @@ public class UserService implements CommunityConstant {
         Map<String, Object> map = new HashMap<>();
 
         // 空值处理
-        if(StringUtils.isBlank(username)) {
+        if (StringUtils.isBlank(username)) {
             map.put("usernameMsg", "账号不能为空。");
             return map;
         }
-        if(StringUtils.isBlank(password)) {
+        if (StringUtils.isBlank(password)) {
             map.put("passwordMsg", "密码不能为空。");
             return map;
         }
 
         // 验证账号的合法性
         User user = userMapper.selectByName(username);
-        if(user == null) {
+        if (user == null) {
             map.put("usernameMsg", "账号不存在。");
             return map;
         }
-        if(user.getStatus() == 0) {
+        if (user.getStatus() == 0) {
             map.put("usernameMsg", "账号未激活。");
             return map;
         }
 
         // 验证密码
         password = CommunityUtil.md5(password + user.getSalt());
-        if(!password.equals(user.getPassword())) {
+        if (!password.equals(user.getPassword())) {
             map.put("passwordMsg", "密码不正确。");
             return map;
         }
@@ -172,7 +185,9 @@ public class UserService implements CommunityConstant {
     }
 
     public int updateHeader(int userId, String headerUrl) {
-        return userMapper.updateHeader(userId, headerUrl);
+        int rows = userMapper.updateHeader(userId, headerUrl);
+        clearCache(userId);
+        return rows;
     }
 
     public boolean checkPassword(int userId, String password) {
@@ -184,11 +199,32 @@ public class UserService implements CommunityConstant {
     public int updatePassword(int userId, String newPassword) {
         User user = userMapper.selectById(userId);
         newPassword = CommunityUtil.md5(newPassword + user.getSalt());
-        return userMapper.updatePassword(userId, newPassword);
+        int rows = userMapper.updatePassword(userId, newPassword);
+        clearCache(userId);
+        return rows;
     }
 
     public User findUserByName(String username) {
+        //TODO: 查询结果同样存入缓存中
         return userMapper.selectByName(username);
+    }
+
+    private User getUserFromCache(int userId) {
+        String redisKey = RedisKeyUtil.getUserKey(userId);
+        User user = (User) redisTemplate.opsForValue().get(redisKey);
+        return user;
+    }
+
+    private User initCache(int userId) {
+        User user = userMapper.selectById(userId);
+        String redisKey = RedisKeyUtil.getUserKey(userId);
+        redisTemplate.opsForValue().set(redisKey, user, 3600, TimeUnit.SECONDS);
+        return user;
+    }
+
+    private void clearCache(int userId) {
+        String redisKey = RedisKeyUtil.getUserKey(userId);
+        redisTemplate.delete(redisKey);
     }
 
 }
