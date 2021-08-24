@@ -6,11 +6,13 @@ import com.nowcoder.community.entity.User;
 import com.nowcoder.community.service.UserService;
 import com.nowcoder.community.util.CommunityConstant;
 import com.nowcoder.community.util.CommunityUtil;
+import com.nowcoder.community.util.RedisKeyUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.CookieValue;
@@ -27,6 +29,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.lang.management.BufferPoolMXBean;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 @Controller
 public class LoginController implements CommunityConstant {
@@ -41,6 +44,9 @@ public class LoginController implements CommunityConstant {
 
     @Autowired
     private Producer kaptcha;
+
+    @Autowired
+    private RedisTemplate redisTemplate;
 
     @Value("${server.servlet.context-path}")
     private String contextPath;
@@ -97,7 +103,17 @@ public class LoginController implements CommunityConstant {
         BufferedImage image = kaptcha.createImage(text);
 
         // 将验证码存入session
-        session.setAttribute("kaptcha", text);
+        // session.setAttribute("kaptcha", text);
+
+        // 首先生成Cookie,将验证码放入其中
+        String captchaOwner = CommunityUtil.generateUUID();
+        Cookie cookie = new Cookie("captchaOwner", captchaOwner);
+        cookie.setMaxAge(60);
+        cookie.setPath(contextPath);
+        response.addCookie(cookie);
+        // 将验证码存入Redis
+        String redisKey = RedisKeyUtil.getCaptchaKey(captchaOwner);
+        redisTemplate.opsForValue().set(redisKey, text, 60, TimeUnit.SECONDS);
 
         // 将突破输出个浏览器
         response.setContentType("image/png");
@@ -112,9 +128,16 @@ public class LoginController implements CommunityConstant {
     //
     @RequestMapping(path = "login", method = RequestMethod.POST)
     public String login(String username, String password, String code,
-                        boolean rememberMe, Model model, HttpSession session, HttpServletResponse response) {
+                        boolean rememberMe, Model model, HttpSession session, HttpServletResponse response,
+                        @CookieValue("captchaOwner") String captchaOwner) {
         // 检查验证码
-        String captcha = (String) session.getAttribute("kaptcha");
+        //String captcha = (String) session.getAttribute("kaptcha");
+        // 从Cookie中取得验证码并验证
+        String captcha = null;
+        if(StringUtils.isNotBlank(captchaOwner)) {
+            String redisKey = RedisKeyUtil.getCaptchaKey(captchaOwner);
+            captcha = (String) redisTemplate.opsForValue().get(redisKey);
+        }
         if(StringUtils.isBlank(captcha) || StringUtils.isBlank(code) || !captcha.equalsIgnoreCase(code)) {
             model.addAttribute("codeMsg", "验证码错误。");
             return "/site/login";
