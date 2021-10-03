@@ -20,7 +20,7 @@ public class QuartzConfig {
         factoryBean.setGroup("alphaJobGroup");
         factoryBean.setDurability(true);
         factoryBean.setRequestsRecovery(true);
-        return null;
+        return factoryBean;
     }
 
     // 配置 Trigger(SimpleTriggerFactoryBean or CronTriggerFactoryBean)
@@ -32,7 +32,7 @@ public class QuartzConfig {
         factoryBean.setGroup("alphaTriggerGroup");
         factoryBean.setRepeatInterval(3000);
         factoryBean.setJobDataMap(new JobDataMap());
-        return null;
+        return factoryBean;
     }
 
 }
