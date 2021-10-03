@@ -18,6 +18,8 @@ public class RedisKeyUtil {
     private static final String PREFIX_TICKET = "ticket";
     // 用户
     private static final String PREFIX_USER = "user";
+    //
+    private static final String PREFIX_POST = "post";
 
     // 某个实体的赞
     // like:entity:entityType:entityId -> set(userId)
@@ -58,4 +60,8 @@ public class RedisKeyUtil {
         return PREFIX_USER + SPLIT + userId;
     }
 
+    // 帖子分数
+    public static  String getPostScoreKey() {
+        return PREFIX_POST + SPLIT + "score";
+    }
 }
